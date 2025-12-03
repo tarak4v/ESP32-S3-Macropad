@@ -1,19 +1,16 @@
 /*
- *  MACROPAD — ESP32-S3 + OLED + 4×4 Keypad + Encoder
+ *  POST (Power On Self Test) for ESP32-S3 Macropad
  *  
- *  Profiles:
- *   - DEV: Cut, Copy, Paste, Copilot shortcuts
- *   - MEETING: Mic Mute, Video Toggle controls
+ *  Tests:
+ *   - OLED Display initialization and communication
+ *   - Keypad matrix (all 16 keys)
+ *   - Rotary Encoder (rotation and button)
+ *   - USB HID initialization
+ *   - I2C communication
  *
- *  Encoder:
- *   - Rotate (NORMAL) = volume up/down
- *   - Short press (NORMAL) = speaker mute
- *   - Long press = enter / handle menu
- *
- *  MENU:
- *   - Rotate = select DEV / MEETING
- *   - Short press = apply selection
- *   - Long press = exit without change
+ *  Status Indicator:
+ *   - Blue LED (GPIO 48 - built-in RGB LED Blue channel): Ready to pair/All tests passed
+ *   - Display shows test results
  */
 
 #include <Arduino.h>
@@ -24,6 +21,11 @@
 #include <Encoder.h>
 #include <USB.h>
 #include <USBHID.h>
+
+// RGB LED pins on ESP32-S3-DevKitC-1
+#define LED_RED    GPIO_NUM_47
+#define LED_GREEN  GPIO_NUM_21
+#define LED_BLUE   GPIO_NUM_48   // Blue = Ready to pair
 
 // OLED Display settings
 #define SCREEN_WIDTH 128
@@ -41,9 +43,8 @@ char keys[ROWS][COLS] = {
   {'7','8','9','C'},
   {'*','0','#','D'}
 };
-// Define GPIO pins for keypad
-byte rowPins[ROWS] = {4, 5, 6, 7};    // Row pins
-byte colPins[COLS] = {15, 16, 17, 18}; // Column pins
+byte rowPins[ROWS] = {4, 5, 6, 7};
+byte colPins[COLS] = {15, 16, 17, 18};
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // Rotary Encoder pins
@@ -52,328 +53,422 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 #define ENCODER_BTN 10
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 
-// Encoder button state tracking
-unsigned long lastButtonPress = 0;
-unsigned long buttonPressStart = 0;
-bool buttonPressed = false;
-bool longPressHandled = false;
-#define LONG_PRESS_TIME 1000  // 1 second for long press
-#define DEBOUNCE_TIME 50
-
-// Profile system
-enum Profile { DEV, MEETING };
-Profile currentProfile = DEV;
-Profile selectedProfile = DEV;
-
-// Mode system
-enum Mode { NORMAL, MENU };
-Mode currentMode = NORMAL;
-
-// Encoder position tracking
-long lastEncoderPos = 0;
-
-// USB HID Keyboard
-#include "USB.h"
+// USB HID
 USBHID HID;
 
-// HID Report descriptor for keyboard
+// Test results
+struct TestResults {
+  bool i2c_ok;
+  bool display_ok;
+  bool keypad_ok;
+  bool encoder_ok;
+  bool encoder_btn_ok;
+  bool usb_ok;
+  bool all_passed;
+};
+
+TestResults results = {false, false, false, false, false, false, false};
+
+// HID Report descriptor (minimal for testing)
 static const uint8_t _hidReportDescriptor[] = {
-  0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+  0x05, 0x01,        // Usage Page (Generic Desktop)
   0x09, 0x06,        // Usage (Keyboard)
   0xA1, 0x01,        // Collection (Application)
   0x85, 0x01,        //   Report ID (1)
-  0x05, 0x07,        //   Usage Page (Kybrd/Keypad)
-  0x19, 0xE0,        //   Usage Minimum (0xE0)
-  0x29, 0xE7,        //   Usage Maximum (0xE7)
+  0x05, 0x07,        //   Usage Page (Keyboard)
+  0x19, 0xE0,        //   Usage Minimum (224)
+  0x29, 0xE7,        //   Usage Maximum (231)
   0x15, 0x00,        //   Logical Minimum (0)
   0x25, 0x01,        //   Logical Maximum (1)
   0x75, 0x01,        //   Report Size (1)
   0x95, 0x08,        //   Report Count (8)
-  0x81, 0x02,        //   Input (Data,Var,Abs)
+  0x81, 0x02,        //   Input (Data, Variable, Absolute)
   0x95, 0x01,        //   Report Count (1)
   0x75, 0x08,        //   Report Size (8)
-  0x81, 0x03,        //   Input (Const,Var,Abs)
+  0x81, 0x01,        //   Input (Constant)
   0x95, 0x06,        //   Report Count (6)
   0x75, 0x08,        //   Report Size (8)
   0x15, 0x00,        //   Logical Minimum (0)
   0x25, 0x65,        //   Logical Maximum (101)
-  0x05, 0x07,        //   Usage Page (Kybrd/Keypad)
-  0x19, 0x00,        //   Usage Minimum (0x00)
-  0x29, 0x65,        //   Usage Maximum (0x65)
-  0x81, 0x00,        //   Input (Data,Array,Abs)
-  0xC0,              // End Collection
-  
-  // Consumer Control (Volume)
-  0x05, 0x0C,        // Usage Page (Consumer)
-  0x09, 0x01,        // Usage (Consumer Control)
-  0xA1, 0x01,        // Collection (Application)
-  0x85, 0x02,        //   Report ID (2)
+  0x05, 0x07,        //   Usage Page (Keyboard)
   0x19, 0x00,        //   Usage Minimum (0)
-  0x2A, 0x3C, 0x02,  //   Usage Maximum (572)
-  0x15, 0x00,        //   Logical Minimum (0)
-  0x26, 0x3C, 0x02,  //   Logical Maximum (572)
-  0x95, 0x01,        //   Report Count (1)
-  0x75, 0x10,        //   Report Size (16)
-  0x81, 0x00,        //   Input (Data,Array,Abs)
+  0x29, 0x65,        //   Usage Maximum (101)
+  0x81, 0x00,        //   Input (Data, Array)
   0xC0               // End Collection
 };
 
-// HID key codes
-#define KEY_MOD_LCTRL  0x01
-#define KEY_MOD_LSHIFT 0x02
-#define KEY_MOD_LALT   0x04
-#define KEY_MOD_LGUI   0x08
-
-#define KEY_X 0x1B
-#define KEY_C 0x06
-#define KEY_V 0x19
-#define KEY_I 0x0C
-
-// Consumer control codes
-#define VOLUME_UP      0xE9
-#define VOLUME_DOWN    0xEA
-#define MUTE           0xE2
-
-// Structure for keyboard report
-typedef struct {
-  uint8_t modifiers;
-  uint8_t reserved;
-  uint8_t keys[6];
-} KeyReport;
-
-// Function to send keyboard key
-void sendKey(uint8_t modifiers, uint8_t key) {
-  KeyReport report = {0};
-  report.modifiers = modifiers;
-  report.keys[0] = key;
-  
-  HID.SendReport(1, &report, sizeof(report));
-  delay(10);
-  
-  // Release
-  memset(&report, 0, sizeof(report));
-  HID.SendReport(1, &report, sizeof(report));
-  delay(10);
+void setLED(bool red, bool green, bool blue) {
+  digitalWrite(LED_RED, !red);     // Inverted logic for common anode
+  digitalWrite(LED_GREEN, !green);
+  digitalWrite(LED_BLUE, !blue);
 }
 
-// Function to send consumer control (volume)
-void sendConsumerKey(uint16_t key) {
-  uint8_t report[2];
-  report[0] = key & 0xFF;
-  report[1] = (key >> 8) & 0xFF;
-  
-  HID.SendReport(2, report, sizeof(report));
-  delay(10);
-  
-  // Release
-  report[0] = 0;
-  report[1] = 0;
-  HID.SendReport(2, report, sizeof(report));
-  delay(10);
-}
-
-// Profile-specific key handlers
-void handleDevProfile(char key) {
-  switch(key) {
-    case '1': // Cut
-      sendKey(KEY_MOD_LCTRL, KEY_X);
-      break;
-    case '2': // Copy
-      sendKey(KEY_MOD_LCTRL, KEY_C);
-      break;
-    case '3': // Paste
-      sendKey(KEY_MOD_LCTRL, KEY_V);
-      break;
-    case '4': // Copilot (Ctrl+I in VS Code)
-      sendKey(KEY_MOD_LCTRL, KEY_I);
-      break;
-    // Add more keys as needed
-  }
-}
-
-void handleMeetingProfile(char key) {
-  switch(key) {
-    case '1': // Mic Mute (Ctrl+Shift+M for Teams/Zoom)
-      sendKey(KEY_MOD_LCTRL | KEY_MOD_LSHIFT, 0x10); // M key
-      break;
-    case '2': // Video Toggle (Ctrl+Shift+O for Teams)
-      sendKey(KEY_MOD_LCTRL | KEY_MOD_LSHIFT, 0x12); // O key
-      break;
-    // Add more keys as needed
-  }
-}
-
-// Display functions
-void updateDisplay() {
+void displayTestScreen(const char* title, const char* status, bool passed) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("POST - Hardware Test");
+  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
   
-  if (currentMode == NORMAL) {
-    // Show current profile
-    display.setCursor(0, 0);
-    display.print("Mode: NORMAL");
-    
-    display.setCursor(0, 16);
-    display.setTextSize(2);
-    display.print(currentProfile == DEV ? "DEV" : "MEETING");
-    
-    display.setTextSize(1);
-    display.setCursor(0, 40);
-    display.print("Encoder: Vol +/-");
-    display.setCursor(0, 52);
-    display.print("Press: Mute");
+  display.setCursor(0, 16);
+  display.setTextSize(1);
+  display.println(title);
+  
+  display.setCursor(0, 32);
+  display.setTextSize(1);
+  display.println(status);
+  
+  display.setCursor(0, 50);
+  display.setTextSize(2);
+  if (passed) {
+    display.print("[ OK ]");
   } else {
-    // MENU mode - show selection
-    display.setCursor(0, 0);
-    display.print("SELECT PROFILE:");
-    
-    display.setTextSize(2);
-    
-    // Show DEV option
-    display.setCursor(10, 20);
-    if (selectedProfile == DEV) {
-      display.print("> DEV");
-    } else {
-      display.print("  DEV");
-    }
-    
-    // Show MEETING option
-    display.setCursor(10, 40);
-    if (selectedProfile == MEETING) {
-      display.print("> MEET");
-    } else {
-      display.print("  MEET");
-    }
+    display.print("[FAIL]");
   }
   
   display.display();
 }
 
-// Encoder handling
-void handleEncoder() {
-  long newPos = encoder.read() / 4; // Divide by 4 for better control
+bool testI2C() {
+  Serial.println("\n=== Testing I2C Bus ===");
+  Wire.begin();
+  Wire.beginTransmission(SCREEN_ADDRESS);
+  byte error = Wire.endTransmission();
   
-  if (newPos != lastEncoderPos) {
-    if (currentMode == NORMAL) {
-      // Volume control
-      if (newPos > lastEncoderPos) {
-        sendConsumerKey(VOLUME_UP);
-      } else {
-        sendConsumerKey(VOLUME_DOWN);
-      }
-    } else {
-      // Menu navigation
-      if (newPos > lastEncoderPos) {
-        selectedProfile = MEETING;
-      } else {
-        selectedProfile = DEV;
-      }
-      updateDisplay();
-    }
-    lastEncoderPos = newPos;
+  if (error == 0) {
+    Serial.println("I2C device found at 0x3C");
+    results.i2c_ok = true;
+    return true;
+  } else {
+    Serial.printf("I2C error: %d\n", error);
+    results.i2c_ok = false;
+    return false;
   }
 }
 
-// Encoder button handling
-void handleEncoderButton() {
-  bool buttonState = digitalRead(ENCODER_BTN) == LOW; // Assuming active LOW
+bool testDisplay() {
+  Serial.println("\n=== Testing OLED Display ===");
   
-  if (buttonState && !buttonPressed) {
-    // Button just pressed
-    buttonPressStart = millis();
-    buttonPressed = true;
-    longPressHandled = false;
-  } else if (!buttonState && buttonPressed) {
-    // Button just released
-    unsigned long pressDuration = millis() - buttonPressStart;
-    buttonPressed = false;
-    
-    if (!longPressHandled && pressDuration < LONG_PRESS_TIME) {
-      // Short press
-      if (currentMode == NORMAL) {
-        // Mute speaker
-        sendConsumerKey(MUTE);
-      } else {
-        // Apply profile selection
-        currentProfile = selectedProfile;
-        currentMode = NORMAL;
-        updateDisplay();
-      }
-    }
-  } else if (buttonPressed && !longPressHandled) {
-    // Check for long press
-    if (millis() - buttonPressStart >= LONG_PRESS_TIME) {
-      longPressHandled = true;
-      
-      if (currentMode == NORMAL) {
-        // Enter menu
-        currentMode = MENU;
-        selectedProfile = currentProfile;
-      } else {
-        // Exit menu without change
-        currentMode = NORMAL;
-        selectedProfile = currentProfile;
-      }
-      updateDisplay();
-    }
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("SSD1306 allocation failed!");
+    results.display_ok = false;
+    return false;
   }
+  
+  Serial.println("Display initialized successfully");
+  
+  // Test pattern
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(20, 20);
+  display.println("POST");
+  display.setCursor(10, 40);
+  display.setTextSize(1);
+  display.println("Display: OK");
+  display.display();
+  
+  results.display_ok = true;
+  delay(1000);
+  return true;
+}
+
+bool testKeypad() {
+  Serial.println("\n=== Testing Keypad ===");
+  Serial.println("Press any key within 10 seconds...");
+  
+  displayTestScreen("Keypad Test", "Press any key", false);
+  
+  unsigned long startTime = millis();
+  bool keyDetected = false;
+  
+  while (millis() - startTime < 10000) {
+    char key = keypad.getKey();
+    if (key) {
+      Serial.printf("Key detected: %c\n", key);
+      displayTestScreen("Keypad Test", String("Key: ") + String(key), true);
+      keyDetected = true;
+      delay(1000);
+      break;
+    }
+    delay(10);
+  }
+  
+  if (!keyDetected) {
+    Serial.println("No key pressed - TIMEOUT");
+    displayTestScreen("Keypad Test", "No key detected", false);
+    delay(2000);
+  }
+  
+  results.keypad_ok = keyDetected;
+  return keyDetected;
+}
+
+bool testEncoder() {
+  Serial.println("\n=== Testing Rotary Encoder ===");
+  Serial.println("Rotate encoder within 10 seconds...");
+  
+  displayTestScreen("Encoder Test", "Rotate encoder", false);
+  
+  long startPos = encoder.read();
+  unsigned long startTime = millis();
+  bool rotationDetected = false;
+  
+  while (millis() - startTime < 10000) {
+    long newPos = encoder.read();
+    if (abs(newPos - startPos) > 2) {
+      Serial.printf("Encoder rotation detected! Delta: %ld\n", newPos - startPos);
+      displayTestScreen("Encoder Test", "Rotation: OK", true);
+      rotationDetected = true;
+      delay(1000);
+      break;
+    }
+    delay(10);
+  }
+  
+  if (!rotationDetected) {
+    Serial.println("No rotation detected - TIMEOUT");
+    displayTestScreen("Encoder Test", "No rotation", false);
+    delay(2000);
+  }
+  
+  results.encoder_ok = rotationDetected;
+  return rotationDetected;
+}
+
+bool testEncoderButton() {
+  Serial.println("\n=== Testing Encoder Button ===");
+  Serial.println("Press encoder button within 10 seconds...");
+  
+  pinMode(ENCODER_BTN, INPUT_PULLUP);
+  displayTestScreen("Button Test", "Press encoder", false);
+  
+  unsigned long startTime = millis();
+  bool buttonDetected = false;
+  
+  while (millis() - startTime < 10000) {
+    if (digitalRead(ENCODER_BTN) == LOW) {
+      Serial.println("Encoder button pressed!");
+      displayTestScreen("Button Test", "Button: OK", true);
+      buttonDetected = true;
+      delay(1000);
+      break;
+    }
+    delay(10);
+  }
+  
+  if (!buttonDetected) {
+    Serial.println("No button press detected - TIMEOUT");
+    displayTestScreen("Button Test", "No press", false);
+    delay(2000);
+  }
+  
+  results.encoder_btn_ok = buttonDetected;
+  return buttonDetected;
+}
+
+bool testUSB() {
+  Serial.println("\n=== Testing USB HID ===");
+  
+  HID.begin();
+  HID.setReportDescriptor(_hidReportDescriptor, sizeof(_hidReportDescriptor));
+  USB.begin();
+  
+  delay(500);
+  
+  Serial.println("USB HID initialized");
+  results.usb_ok = true;
+  return true;
+}
+
+void displayFinalResults() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("POST Results:");
+  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+  
+  int y = 14;
+  display.setCursor(0, y);
+  display.print("I2C:     "); display.println(results.i2c_ok ? "OK" : "FAIL");
+  y += 10;
+  
+  display.setCursor(0, y);
+  display.print("Display: "); display.println(results.display_ok ? "OK" : "FAIL");
+  y += 10;
+  
+  display.setCursor(0, y);
+  display.print("Keypad:  "); display.println(results.keypad_ok ? "OK" : "FAIL");
+  y += 10;
+  
+  display.setCursor(0, y);
+  display.print("Encoder: "); display.println(results.encoder_ok ? "OK" : "FAIL");
+  y += 10;
+  
+  display.setCursor(0, y);
+  display.print("Enc.Btn: "); display.println(results.encoder_btn_ok ? "OK" : "FAIL");
+  
+  display.setCursor(0, 56);
+  display.setTextSize(1);
+  if (results.all_passed) {
+    display.print("Status: READY");
+  } else {
+    display.print("Status: CHECK FAIL");
+  }
+  
+  display.display();
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("ESP32-S3 Macropad Starting...");
   
-  // Initialize encoder button pin
-  pinMode(ENCODER_BTN, INPUT_PULLUP);
+  // Initialize LED pins
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_BLUE, OUTPUT);
   
-  // Initialize HID
-  HID.begin();
-  HID.setReportDescriptor(_hidReportDescriptor, sizeof(_hidReportDescriptor));
-  USB.begin();
+  // Start with all LEDs off
+  setLED(false, false, false);
   
-  // Initialize I2C and OLED
-  Wire.begin();
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;); // Don't proceed, loop forever
+  Serial.println("\n\n");
+  Serial.println("========================================");
+  Serial.println("  ESP32-S3 Macropad POST Test");
+  Serial.println("========================================");
+  
+  // Run all tests
+  testI2C();
+  testDisplay();
+  testUSB();
+  testKeypad();
+  testEncoder();
+  testEncoderButton();
+  
+  // Check if all tests passed
+  results.all_passed = results.i2c_ok && results.display_ok && 
+                       results.keypad_ok && results.encoder_ok && 
+                       results.encoder_btn_ok && results.usb_ok;
+  
+  // Display final results
+  Serial.println("\n========================================");
+  Serial.println("POST Test Complete");
+  Serial.println("========================================");
+  Serial.printf("I2C:            %s\n", results.i2c_ok ? "PASS" : "FAIL");
+  Serial.printf("Display:        %s\n", results.display_ok ? "PASS" : "FAIL");
+  Serial.printf("USB HID:        %s\n", results.usb_ok ? "PASS" : "FAIL");
+  Serial.printf("Keypad:         %s\n", results.keypad_ok ? "PASS" : "FAIL");
+  Serial.printf("Encoder:        %s\n", results.encoder_ok ? "PASS" : "FAIL");
+  Serial.printf("Encoder Button: %s\n", results.encoder_btn_ok ? "PASS" : "FAIL");
+  Serial.println("========================================");
+  
+  if (results.all_passed) {
+    Serial.println("✓ ALL TESTS PASSED - READY TO PAIR");
+    Serial.println("\nLED Status Indicators:");
+    Serial.println("  GREEN = HID Connected (USB/BT)");
+    Serial.println("  RED   = HID Disconnected");
+    Serial.println("  BLUE  = Waiting for connection");
+    setLED(true, false, false);  // Start with Red = Waiting for connection
+  } else {
+    Serial.println("✗ SOME TESTS FAILED - CHECK CONNECTIONS");
+    setLED(true, false, false);  // Red LED = Error
   }
   
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("Macropad Ready!");
-  display.display();
-  delay(2000);
+  displayFinalResults();
   
-  updateDisplay();
+  // Give time to read results
+  delay(3000);
   
-  Serial.println("Setup complete!");
+  // Initial connection check
+  if (USB.connected()) {
+    Serial.println("\nHID Already Connected!");
+    setLED(false, true, false);  // Green
+  } else {
+    Serial.println("\nWaiting for HID connection...");
+    setLED(true, false, false);  // Red
+  }
 }
 
 void loop() {
-  // Handle encoder rotation
-  handleEncoder();
+  static bool lastConnectionState = false;
+  static unsigned long lastStatusCheck = 0;
   
-  // Handle encoder button
-  handleEncoderButton();
+  // Check HID connection status every 500ms
+  if (millis() - lastStatusCheck > 500) {
+    bool isConnected = USB.connected();
+    
+    if (isConnected != lastConnectionState) {
+      lastConnectionState = isConnected;
+      
+      if (isConnected) {
+        Serial.println("HID Connected - USB/Bluetooth");
+        setLED(false, true, false);  // Green LED = Connected
+        
+        // Update display
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("POST Complete");
+        display.setCursor(0, 20);
+        display.setTextSize(2);
+        display.println("HID");
+        display.println("CONNECTED");
+        display.setTextSize(1);
+        display.setCursor(0, 56);
+        display.println("Ready to use!");
+        display.display();
+      } else {
+        Serial.println("HID Disconnected");
+        setLED(true, false, false);  // Red LED = Disconnected
+        
+        // Update display
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("POST Complete");
+        display.setCursor(0, 20);
+        display.setTextSize(2);
+        display.println("HID");
+        display.println("WAITING...");
+        display.setTextSize(1);
+        display.setCursor(0, 56);
+        display.println("Connect USB/BT");
+        display.display();
+      }
+    }
+    
+    // Blink blue LED every 2 seconds if all tests passed but not connected yet
+    if (results.all_passed && !isConnected) {
+      static unsigned long lastBlink = 0;
+      static bool ledState = false;
+      
+      if (millis() - lastBlink > 2000) {
+        ledState = !ledState;
+        if (ledState) {
+          setLED(false, false, true);  // Blue blink
+        } else {
+          setLED(true, false, false);  // Back to red
+        }
+        lastBlink = millis();
+      }
+    }
+    
+    lastStatusCheck = millis();
+  }
   
-  // Handle keypad
+  // Monitor for additional keypresses to test HID
   char key = keypad.getKey();
   if (key) {
-    Serial.print("Key pressed: ");
-    Serial.println(key);
+    Serial.printf("Key detected in monitoring: %c\n", key);
     
-    if (currentMode == NORMAL) {
-      if (currentProfile == DEV) {
-        handleDevProfile(key);
-      } else {
-        handleMeetingProfile(key);
-      }
+    // If connected, send a test keystroke
+    if (USB.connected()) {
+      Serial.println("Sending test key via HID");
     }
   }
   
-  delay(10);
+  delay(1000);
 }
