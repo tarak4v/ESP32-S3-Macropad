@@ -1,5 +1,7 @@
 # ESP32-S3 Macropad
 
+[![PlatformIO CI](https://github.com/tarak4v/ESP32-S3-Macropad/actions/workflows/build.yml/badge.svg)](https://github.com/tarak4v/ESP32-S3-Macropad/actions/workflows/build.yml)
+
 A versatile USB HID macropad built with ESP32-S3, featuring OLED display, 4×4 matrix keypad, and rotary encoder with multiple profiles for different workflows.
 
 ## Features
