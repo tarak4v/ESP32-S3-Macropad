@@ -24,31 +24,14 @@ A versatile USB HID macropad built with ESP32-S3, featuring OLED display, 4×4 m
 
 ### Pin Configuration
 
-#### OLED Display (I2C)
-- **SDA**: GPIO 21 (default I2C SDA)
-- **SCL**: GPIO 22 (default I2C SCL)
-- **VCC**: 3.3V
-- **GND**: GND
+> **📋 Complete wiring documentation**: See [docs/wiring.md](docs/wiring.md) for the canonical pin mapping reference.
 
-#### 4×4 Matrix Keypad
-**Row Pins:**
-- Row 1: GPIO 4
-- Row 2: GPIO 5
-- Row 3: GPIO 6
-- Row 4: GPIO 7
-
-**Column Pins:**
-- Col 1: GPIO 15
-- Col 2: GPIO 16
-- Col 3: GPIO 17
-- Col 4: GPIO 18
-
-#### Rotary Encoder
-- **CLK (A)**: GPIO 8
-- **DT (B)**: GPIO 9
-- **SW (Button)**: GPIO 10
-- **VCC**: 3.3V
-- **GND**: GND
+**Quick Reference:**
+- **OLED**: GPIO 21 (SDA), GPIO 22 (SCL) - I2C 0x3C
+- **Keypad Rows**: GPIO 4, 5, 6, 7
+- **Keypad Columns**: GPIO 15, 16, 17, 18
+- **Encoder**: GPIO 8 (CLK), GPIO 9 (DT), GPIO 10 (Button)
+- **Status LEDs**: GPIO 47 (Red), GPIO 21 (Green), GPIO 48 (Blue)
 
 ## Software Setup
 
