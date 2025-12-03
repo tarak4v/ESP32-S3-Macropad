@@ -64,14 +64,14 @@ enum class InputEvent : uint8_t {
  * @brief LED status colors
  */
 enum class LEDStatus : uint8_t {
-  OFF,
-  RED,
-  GREEN,
-  BLUE,
-  YELLOW,
-  CYAN,
-  MAGENTA,
-  WHITE
+  LED_OFF,
+  LED_RED,
+  LED_GREEN,
+  LED_BLUE,
+  LED_YELLOW,
+  LED_CYAN,
+  LED_MAGENTA,
+  LED_WHITE
 };
 
 /**
