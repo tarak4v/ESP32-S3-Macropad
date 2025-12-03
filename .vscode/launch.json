@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "platformio-debug",
+      "request": "launch",
+      "name": "PIO Debug (USB-JTAG)",
+      "executable": "${workspaceFolder}/.pio/build/esp32-s3-devkitc-1/firmware.elf",
+      "projectEnvName": "esp32-s3-devkitc-1",
+      "toolchainBinDir": "",
+      "internalConsoleOptions": "openOnSessionStart",
+      "svdPath": "${env:HOME}/.platformio/platforms/espressif32/misc/svd/esp32s3.svd",
+      "preLaunchTask": {
+        "type": "PlatformIO",
+        "task": "Pre-Debug"
+      }
+    },
+    {
+      "type": "platformio-debug",
+      "request": "launch",
+      "name": "PIO Debug (USB-JTAG, skip Pre-Debug)",
+      "executable": "${workspaceFolder}/.pio/build/esp32-s3-devkitc-1/firmware.elf",
+      "projectEnvName": "esp32-s3-devkitc-1",
+      "toolchainBinDir": "",
+      "internalConsoleOptions": "openOnSessionStart",
+      "svdPath": "${env:HOME}/.platformio/platforms/espressif32/misc/svd/esp32s3.svd"
+    },
+    {
+      "type": "platformio-debug",
+      "request": "launch",
+      "name": "PIO Debug (without uploading)",
+      "executable": "${workspaceFolder}/.pio/build/esp32-s3-devkitc-1/firmware.elf",
+      "projectEnvName": "esp32-s3-devkitc-1",
+      "toolchainBinDir": "",
+      "internalConsoleOptions": "openOnSessionStart",
+      "loadMode": "manual"
+    }
+  ]
+}
