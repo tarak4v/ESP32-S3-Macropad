@@ -1,0 +1,28 @@
+name: Format Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+    
+    - name: Check C++ formatting
+      run: |
+        find src include lib -name '*.cpp' -or -name '*.h' | xargs clang-format -i --dry-run --Werror
+    
+    - name: Check JSON formatting
+      uses: actionsx/prettier@v2
+      with:
+        args: --check "keymaps/*.json"
