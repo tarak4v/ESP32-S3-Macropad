@@ -22,6 +22,7 @@
 #include "ui.h"
 #include "storage.h"
 #include "ota.h"
+#include "roboeyes_mode.h"
 
 // Module instances
 MatrixScanner matrix;
@@ -30,8 +31,14 @@ UIManager ui;
 StorageManager storage;
 OTAManager ota;
 
+// RoboEyes mode instance (initialized after ui.begin())
+RoboEyesMode* roboEyes = nullptr;
+
 // Encoder instance (not yet modularized)
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
+
+// Application state
+AppState appState = AppState::POST_TEST;
 
 // POST test results
 POSTResults results;
@@ -226,6 +233,11 @@ void setup() {
   
   delay(2000);
   
+  // Initialize RoboEyes mode (after display is initialized)
+  roboEyes = new RoboEyesMode(ui.getDisplay());
+  Serial.println("\n✓ RoboEyes mode available");
+  Serial.println("  Long press encoder button to enter");
+  
   // Initialize OTA for wireless updates
   #if OTA_ENABLED
   Serial.println("\n========================================");
@@ -265,49 +277,92 @@ void loop() {
   static unsigned long lastStatusCheck = 0;
   static unsigned long lastBlink = 0;
   static bool ledState = false;
+  static unsigned long encoderButtonPressTime = 0;
+  static bool encoderButtonPressed = false;
   
-  // Check HID connection status periodically
   unsigned long now = millis();
-  if (now - lastStatusCheck > STATUS_UPDATE_MS) {
-    bool isConnected = hid.isConnected();
+  
+  // Check for RoboEyes mode toggle (long press encoder button)
+  bool encoderButton = (digitalRead(ENCODER_BTN_PIN) == LOW);
+  if (encoderButton && !encoderButtonPressed) {
+    encoderButtonPressed = true;
+    encoderButtonPressTime = now;
+  } else if (!encoderButton && encoderButtonPressed) {
+    encoderButtonPressed = false;
+    unsigned long pressDuration = now - encoderButtonPressTime;
     
-    // Connection state changed
-    if (isConnected != lastConnectionState) {
-      lastConnectionState = isConnected;
-      
-      if (isConnected) {
-        Serial.println("HID Connected");
-        setLED(false, true, false);  // Green
-        ui.drawHIDStatus(true);
-      } else {
-        Serial.println("HID Disconnected");
-        setLED(true, false, false);  // Red
-        ui.drawHIDStatus(false);
+    // Long press to toggle RoboEyes mode
+    if (pressDuration >= LONG_PRESS_THRESHOLD_MS) {
+      if (appState == AppState::ROBOEYES) {
+        // Exit RoboEyes mode
+        appState = AppState::NORMAL;
+        Serial.println("\n✗ Exiting RoboEyes mode");
+        ui.drawHIDStatus(hid.isConnected());
+      } else if (appState == AppState::NORMAL) {
+        // Enter RoboEyes mode
+        appState = AppState::ROBOEYES;
+        Serial.println("\n✓ Entering RoboEyes mode");
+        roboEyes->begin();
       }
     }
-    
-    // Blink blue LED if POST passed but not connected
-    if (results.allPassed() && !isConnected) {
-      if (now - lastBlink > 2000) {
-        ledState = !ledState;
-        setLED(ledState ? false : true, false, ledState ? true : false);
-        lastBlink = now;
-      }
-    }
-    
-    lastStatusCheck = now;
   }
   
-  // Monitor keypresses (for testing HID)
-  matrix.update();
-  char key;
-  if (matrix.getKey(key)) {
-    Serial.printf("Key: %c\n", key);
+  // Handle different application states
+  if (appState == AppState::ROBOEYES) {
+    // RoboEyes mode - handle keypad input and update animation
+    roboEyes->update();
     
-    // If connected, send test keystroke
-    if (hid.isConnected()) {
-      hid.sendKey(HID_KEY_A + (key - '1'));  // Simple mapping for demo
-      Serial.println("  -> Sent via HID");
+    matrix.update();
+    char key;
+    if (matrix.getKey(key)) {
+      roboEyes->handleKey(key);
+    }
+    
+  } else {
+    // Normal mode - HID functionality
+    
+    // Check HID connection status periodically
+    if (now - lastStatusCheck > STATUS_UPDATE_MS) {
+      bool isConnected = hid.isConnected();
+      
+      // Connection state changed
+      if (isConnected != lastConnectionState) {
+        lastConnectionState = isConnected;
+        
+        if (isConnected) {
+          Serial.println("HID Connected");
+          setLED(false, true, false);  // Green
+          ui.drawHIDStatus(true);
+        } else {
+          Serial.println("HID Disconnected");
+          setLED(true, false, false);  // Red
+          ui.drawHIDStatus(false);
+        }
+      }
+      
+      // Blink blue LED if POST passed but not connected
+      if (results.allPassed() && !isConnected) {
+        if (now - lastBlink > 2000) {
+          ledState = !ledState;
+          setLED(ledState ? false : true, false, ledState ? true : false);
+          lastBlink = now;
+        }
+      }
+      
+      lastStatusCheck = now;
+    }
+    
+    // Monitor keypresses (for testing HID)
+    matrix.update();
+    char key;
+    if (matrix.getKey(key)) {
+      Serial.printf("Key: %c\n", key);
+      
+      // If connected, send test keystroke
+      if (hid.isConnected()) {
+        hid.sendKey(HID_KEY_A + (key - '1'));  // Simple mapping for demo
+        Serial.println("  -> Sent via HID");
+      }
     }
   }
   

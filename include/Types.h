@@ -22,7 +22,8 @@ enum class AppState : uint8_t {
   NORMAL,       ///< Normal operation mode
   MENU,         ///< Menu navigation
   SETTINGS,     ///< Settings screen
-  POST_TEST     ///< Power-on self test
+  POST_TEST,    ///< Power-on self test
+  ROBOEYES      ///< RoboEyes animated display mode
 };
 
 /**
