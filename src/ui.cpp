@@ -240,7 +240,7 @@ void UIManager::drawHIDStatus(bool connected) {
   _display.println(connected ? F("CONNECTED") : F("WAITING..."));
   
   _display.setTextSize(1);
-  drawFooter(connected ? "Ready to use!" : "Connect USB/BT");
+  drawFooter(connected ? "Ready to use!" : "Connect USB");
   
   _display.display();
 }
