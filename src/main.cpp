@@ -21,12 +21,14 @@
 #include "hid.h"
 #include "ui.h"
 #include "storage.h"
+#include "ota.h"
 
 // Module instances
 MatrixScanner matrix;
 HIDInterface hid;
 UIManager ui;
 StorageManager storage;
+OTAManager ota;
 
 // Encoder instance (not yet modularized)
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
@@ -223,9 +225,42 @@ void setup() {
   }
   
   delay(2000);
+  
+  // Initialize OTA for wireless updates
+  #if OTA_ENABLED
+  Serial.println("\n========================================");
+  Serial.println("Initializing OTA...");
+  Serial.println("========================================");
+  
+  if (ota.begin(WIFI_SSID, WIFI_PASSWORD, OTA_HOSTNAME, OTA_PORT)) {
+    Serial.println("✓ OTA Enabled");
+    Serial.printf("  Hostname: %s.local\n", OTA_HOSTNAME);
+    Serial.printf("  IP: %s\n", ota.getIPAddress().c_str());
+    Serial.printf("  Port: %d\n", OTA_PORT);
+    Serial.println("\nReady for wireless updates!");
+    Serial.println("Use: pio run -t upload --upload-port " + ota.getIPAddress());
+    
+    // Blink green LED 10 times to indicate successful WiFi connection
+    Serial.println("\nWiFi connected - blinking green LED...");
+    for (int i = 0; i < 10; i++) {
+      setLED(false, true, false);  // Green ON
+      delay(500);
+      setLED(false, false, false); // LED OFF
+      delay(500);
+    }
+  } else {
+    Serial.println("✗ OTA initialization failed");
+    Serial.println("  Continuing with USB-only mode...");
+  }
+  #endif
 }
 
 void loop() {
+  // Handle OTA updates
+  #if OTA_ENABLED
+  ota.handle();
+  #endif
+  
   static bool lastConnectionState = false;
   static unsigned long lastStatusCheck = 0;
   static unsigned long lastBlink = 0;

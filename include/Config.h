@@ -108,12 +108,24 @@ struct DefaultConfig {
 #endif
 
 // ============================================================================
+// OTA CONFIGURATION
+// ============================================================================
+
+#define OTA_ENABLED               false
+#define OTA_HOSTNAME              "Tarak-HID-Host"
+#define OTA_PORT                  3232
+
+// WiFi credentials (change these for your network)
+#define WIFI_SSID                 "Tarak 2.4_EXT"
+#define WIFI_PASSWORD             "1Tarak3385"
+
+// ============================================================================
 // VERSION INFORMATION
 // ============================================================================
 
 #define FIRMWARE_VERSION          "1.0.0"
-#define FIRMWARE_DATE             "2025-12-03"
-#define FIRMWARE_NAME             "ESP32-S3-Macropad"
+#define FIRMWARE_DATE             "2025-12-05"
+#define FIRMWARE_NAME             "Tarak-HID"
 #define FIRMWARE_AUTHOR           "tarak4v"
 
 #endif // CONFIG_H
