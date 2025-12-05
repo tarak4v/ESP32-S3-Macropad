@@ -57,7 +57,7 @@
     ],
     [
       "oled1:SCL",
-      "esp:GPIO22",
+      "esp:22",
       "green",
       [
         "v0"
@@ -65,7 +65,7 @@
     ],
     [
       "oled1:SDA",
-      "esp:GPIO21",
+      "esp:21",
       "blue",
       [
         "v0"
@@ -73,7 +73,7 @@
     ],
     [
       "keypad1:R1",
-      "esp:GPIO4",
+      "esp:4",
       "gray",
       [
         "v0"
@@ -81,7 +81,7 @@
     ],
     [
       "keypad1:R2",
-      "esp:GPIO5",
+      "esp:5",
       "white",
       [
         "v0"
@@ -89,7 +89,7 @@
     ],
     [
       "keypad1:R3",
-      "esp:GPIO6",
+      "esp:6",
       "violet",
       [
         "v0"
@@ -97,7 +97,7 @@
     ],
     [
       "keypad1:R4",
-      "esp:GPIO7",
+      "esp:7",
       "orange",
       [
         "v0"
@@ -105,7 +105,7 @@
     ],
     [
       "keypad1:C1",
-      "esp:GPIO15",
+      "esp:15",
       "cyan",
       [
         "v0"
@@ -113,7 +113,7 @@
     ],
     [
       "keypad1:C2",
-      "esp:GPIO16",
+      "esp:16",
       "yellow",
       [
         "v0"
@@ -121,7 +121,7 @@
     ],
     [
       "keypad1:C3",
-      "esp:GPIO17",
+      "esp:17",
       "magenta",
       [
         "v0"
@@ -129,7 +129,7 @@
     ],
     [
       "keypad1:C4",
-      "esp:GPIO18",
+      "esp:18",
       "brown",
       [
         "v0"
@@ -153,7 +153,7 @@
     ],
     [
       "encoder1:CLK",
-      "esp:GPIO8",
+      "esp:8",
       "green",
       [
         "v0"
@@ -161,7 +161,7 @@
     ],
     [
       "encoder1:DT",
-      "esp:GPIO9",
+      "esp:9",
       "blue",
       [
         "v0"
@@ -169,7 +169,7 @@
     ],
     [
       "encoder1:SW",
-      "esp:GPIO10",
+      "esp:10",
       "purple",
       [
         "v0"
