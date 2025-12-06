@@ -9,7 +9,7 @@
 
 2. **diagram.json** - Hardware wiring diagram
    - ESP32-S3-DevKitC-1 board
-   - SSD1306 OLED (128×64, I2C 0x3C)
+   - SH1106 OLED (128×64, I2C 0x3C)
    - 4×4 Membrane Keypad
    - KY-040 Rotary Encoder
    - All GPIO connections mapped
@@ -35,7 +35,7 @@
 ### OLED Display (I2C)
 - VCC → ESP32-S3 3V3
 - GND → ESP32-S3 GND
-- SDA → GPIO21
+- SDA → GPIO21OLED SDA shall be 
 - SCL → GPIO22
 - Address: 0x3C
 

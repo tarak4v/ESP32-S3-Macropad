@@ -41,7 +41,7 @@
   "connections": [
     [
       "oled1:GND",
-      "esp:GND.1",
+      "esp:GND",
       "black",
       [
         "v0"
@@ -57,7 +57,7 @@
     ],
     [
       "oled1:SCL",
-      "esp:22",
+      "esp:13",
       "green",
       [
         "v0"
@@ -65,7 +65,7 @@
     ],
     [
       "oled1:SDA",
-      "esp:21",
+      "esp:14",
       "blue",
       [
         "v0"
@@ -137,7 +137,7 @@
     ],
     [
       "encoder1:GND",
-      "esp:GND.2",
+      "esp:GND",
       "black",
       [
         "v0"
@@ -153,7 +153,7 @@
     ],
     [
       "encoder1:CLK",
-      "esp:8",
+      "esp:21",
       "green",
       [
         "v0"
@@ -161,7 +161,7 @@
     ],
     [
       "encoder1:DT",
-      "esp:9",
+      "esp:22",
       "blue",
       [
         "v0"

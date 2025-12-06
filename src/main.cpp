@@ -1,370 +1,150 @@
 /**
  * @file main.cpp
- * @brief ESP32-S3 Macropad - POST Test with Modular Architecture
- * @author tarak4v
- * @date 2025-12-03
- * 
- * Power-On Self Test (POST) for hardware validation.
- * Tests: I2C, OLED, Keypad, Encoder, USB HID, Storage
- * 
- * Status LEDs:
- *  - GREEN: HID connected and ready
- *  - RED: HID disconnected / POST failed
- *  - BLUE: POST passed, waiting for connection
+ * @brief Minimal welcome screen with Wi-Fi/Bluetooth status icons.
  */
 
 #include <Arduino.h>
-#include <Encoder.h>
-#include "Config.h"
-#include "Types.h"
-#include "matrix.h"
-#include "hid.h"
-#include "ui.h"
-#include "storage.h"
-#include "ota.h"
-#include "roboeyes_mode.h"
+#include <Wire.h>
+#include <WiFi.h>
+#include <NimBLEDevice.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
-// Module instances
-MatrixScanner matrix;
-HIDInterface hid;
-UIManager ui;
-StorageManager storage;
-OTAManager ota;
+namespace {
 
-// RoboEyes mode instance (initialized after ui.begin())
-RoboEyesMode* roboEyes = nullptr;
+constexpr uint8_t SCREEN_WIDTH = 128;
+constexpr uint8_t SCREEN_HEIGHT = 64;
+constexpr int8_t OLED_RESET_PIN = -1;
+constexpr uint8_t OLED_I2C_ADDRESS = 0x3C;
+constexpr int OLED_SDA_PIN = 14;
+constexpr int OLED_SCL_PIN = 13;
+constexpr uint32_t DISPLAY_REFRESH_MS = 500;
 
-// Encoder instance (not yet modularized)
-Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
-// Application state
-AppState appState = AppState::POST_TEST;
+volatile bool gBleConnected = false;
+unsigned long gLastRender = 0;
 
-// POST test results
-POSTResults results;
-
-// LED control helper
-void setLED(bool red, bool green, bool blue) {
-  digitalWrite(LED_RED_PIN, !red);     // Inverted logic for common anode
-  digitalWrite(LED_GREEN_PIN, !green);
-  digitalWrite(LED_BLUE_PIN, !blue);
-}
-
-// POST test functions
-bool testI2C() {
-  Serial.println("\n=== Testing I2C Bus ===");
-  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  Wire.beginTransmission(OLED_ADDRESS);
-  byte error = Wire.endTransmission();
-  
-  results.i2c_ok = (error == 0);
-  Serial.printf("I2C: %s\n", results.i2c_ok ? "OK" : "FAIL");
-  return results.i2c_ok;
-}
-
-bool testDisplay() {
-  Serial.println("\n=== Testing OLED Display ===");
-  results.display_ok = ui.begin();
-  
-  if (results.display_ok) {
-    ui.drawSplash(FIRMWARE_VERSION);
-    delay(1000);
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer*) override {
+    gBleConnected = true;
   }
-  
-  Serial.printf("Display: %s\n", results.display_ok ? "OK" : "FAIL");
-  return results.display_ok;
-}
 
-bool testKeypad() {
-  Serial.println("\n=== Testing Keypad ===");
-  
-  if (!matrix.begin()) {
-    Serial.println("Matrix initialization failed!");
-    results.keypad_ok = false;
-    return false;
+  void onDisconnect(NimBLEServer*) override {
+    gBleConnected = false;
+    NimBLEDevice::startAdvertising();
   }
-  
-  Serial.println("Press any key within 10 seconds...");
-  ui.drawPOSTTest("Keypad Test", "Press any key", false);
-  
-  unsigned long startTime = millis();
-  char key;
-  
-  while (millis() - startTime < 10000) {
-    matrix.update();
-    if (matrix.getKey(key)) {
-      Serial.printf("Key detected: %c\n", key);
-      char msg[32];
-      snprintf(msg, sizeof(msg), "Key: %c", key);
-      ui.drawPOSTTest("Keypad Test", msg, true);
-      results.keypad_ok = true;
-      delay(1000);
-      return true;
-    }
-    delay(10);
+};
+
+ServerCallbacks gBleCallbacks;
+
+void drawWifiIcon(int16_t x, int16_t y) {
+  const int16_t cx = x + 7;
+  const int16_t cy = y + 5;
+
+  for (int radius = 6; radius >= 2; radius -= 2) {
+    display.drawCircleHelper(cx, cy, radius, 0x1, SSD1306_WHITE);
+    display.drawCircleHelper(cx, cy, radius, 0x2, SSD1306_WHITE);
   }
-  
-  Serial.println("No key pressed - TIMEOUT");
-  ui.drawPOSTTest("Keypad Test", "No key detected", false);
-  delay(2000);
-  results.keypad_ok = false;
-  return false;
+
+  display.drawLine(cx - 3, cy + 3, cx + 3, cy + 3, SSD1306_WHITE);
+  display.drawLine(cx - 2, cy + 4, cx + 2, cy + 4, SSD1306_WHITE);
+  display.fillCircle(cx, cy + 6, 1, SSD1306_WHITE);
 }
 
-bool testEncoder() {
-  Serial.println("\n=== Testing Rotary Encoder ===");
-  Serial.println("Rotate encoder within 10 seconds...");
-  
-  ui.drawPOSTTest("Encoder Test", "Rotate encoder", false);
-  
-  long startPos = encoder.read();
-  unsigned long startTime = millis();
-  
-  while (millis() - startTime < 10000) {
-    long newPos = encoder.read();
-    if (abs(newPos - startPos) > 2) {
-      Serial.printf("Encoder rotation detected! Delta: %ld\n", newPos - startPos);
-      ui.drawPOSTTest("Encoder Test", "Rotation: OK", true);
-      results.encoder_ok = true;
-      delay(1000);
-      return true;
-    }
-    delay(10);
+void drawBluetoothIcon(int16_t x, int16_t y) {
+  const int16_t cx = x + 3;
+  const int16_t top = y;
+
+  display.drawLine(cx, top, cx, top + 15, SSD1306_WHITE);
+  display.drawLine(cx, top, cx + 5, top + 4, SSD1306_WHITE);
+  display.drawLine(cx + 5, top + 4, cx, top + 8, SSD1306_WHITE);
+  display.drawLine(cx, top + 8, cx + 5, top + 12, SSD1306_WHITE);
+  display.drawLine(cx + 5, top + 12, cx, top + 16, SSD1306_WHITE);
+}
+
+void renderScreen() {
+  display.clearDisplay();
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(16, 8);
+  display.print(F("Tarak's HID"));
+
+  const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+  if (wifiConnected) {
+    drawWifiIcon(SCREEN_WIDTH - 16, 0);
   }
-  
-  Serial.println("No rotation detected - TIMEOUT");
-  ui.drawPOSTTest("Encoder Test", "No rotation", false);
-  delay(2000);
-  results.encoder_ok = false;
-  return false;
-}
 
-bool testEncoderButton() {
-  Serial.println("\n=== Testing Encoder Button ===");
-  Serial.println("Press encoder button within 10 seconds...");
-  
-  pinMode(ENCODER_BTN_PIN, INPUT_PULLUP);
-  ui.drawPOSTTest("Button Test", "Press encoder", false);
-  
-  unsigned long startTime = millis();
-  
-  while (millis() - startTime < 10000) {
-    if (digitalRead(ENCODER_BTN_PIN) == LOW) {
-      Serial.println("Encoder button pressed!");
-      ui.drawPOSTTest("Button Test", "Button: OK", true);
-      results.encoder_btn_ok = true;
-      delay(1000);
-      return true;
-    }
-    delay(10);
+  if (gBleConnected) {
+    drawBluetoothIcon(SCREEN_WIDTH - 16, 20);
   }
-  
-  Serial.println("No button press detected - TIMEOUT");
-  ui.drawPOSTTest("Button Test", "No press", false);
-  delay(2000);
-  results.encoder_btn_ok = false;
-  return false;
+
+  display.setTextSize(1);
+  display.setCursor(0, 44);
+  display.print(F("IP: "));
+
+  if (wifiConnected) {
+    display.print(WiFi.localIP());
+  } else {
+    display.print(F("--.--.--.--"));
+  }
+
+  display.display();
 }
 
-bool testUSB() {
-  Serial.println("\n=== Testing USB HID ===");
-  results.usb_ok = hid.begin();
-  delay(500);
-  Serial.printf("USB HID: %s\n", results.usb_ok ? "OK" : "FAIL");
-  return results.usb_ok;
+void setupWifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();
 }
 
-bool testStorage() {
-  Serial.println("\n=== Testing Storage ===");
-  results.spiffs_ok = storage.begin();
-  Serial.printf("Storage: %s\n", results.spiffs_ok ? "OK" : "FAIL");
-  return results.spiffs_ok;
+void setupBle() {
+  NimBLEDevice::init("ESP32S3-MacroPad");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+  NimBLEServer* server = NimBLEDevice::createServer();
+  server->setCallbacks(&gBleCallbacks);
+
+  NimBLEService* service = server->createService("180F");
+  service->start();
+
+  NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+  advertising->addServiceUUID(service->getUUID());
+  advertising->start();
 }
+
+} // namespace
 
 void setup() {
-  Serial.begin(DEBUG_BAUD_RATE);
-  delay(1000);
-  
-  // Initialize LED pins
-  pinMode(LED_RED_PIN, OUTPUT);
-  pinMode(LED_GREEN_PIN, OUTPUT);
-  pinMode(LED_BLUE_PIN, OUTPUT);
-  setLED(false, false, false);
-  
-  Serial.println("\n========================================");
-  Serial.printf("  %s v%s\n", FIRMWARE_NAME, FIRMWARE_VERSION);
-  Serial.println("  POST Test - Modular Architecture");
-  Serial.println("========================================");
-  
-  // Run all POST tests
-  testI2C();
-  testDisplay();
-  testUSB();
-  testStorage();
-  testKeypad();
-  testEncoder();
-  testEncoderButton();
-  
-  // Display final results
-  Serial.println("\n========================================");
-  Serial.println("POST Test Complete");
-  Serial.println("========================================");
-  Serial.printf("I2C:            %s\n", results.i2c_ok ? "PASS" : "FAIL");
-  Serial.printf("Display:        %s\n", results.display_ok ? "PASS" : "FAIL");
-  Serial.printf("USB HID:        %s\n", results.usb_ok ? "PASS" : "FAIL");
-  Serial.printf("Storage:        %s\n", results.spiffs_ok ? "PASS" : "FAIL");
-  Serial.printf("Keypad:         %s\n", results.keypad_ok ? "PASS" : "FAIL");
-  Serial.printf("Encoder:        %s\n", results.encoder_ok ? "PASS" : "FAIL");
-  Serial.printf("Encoder Button: %s\n", results.encoder_btn_ok ? "PASS" : "FAIL");
-  Serial.println("========================================");
-  
-  // Display results on OLED
-  ui.drawPOST(results);
-  delay(3000);
-  
-  // Set LED based on results
-  if (results.allPassed()) {
-    Serial.println("✓ ALL TESTS PASSED");
-    setLED(false, false, true);  // Blue = Ready
-  } else {
-    Serial.println("✗ SOME TESTS FAILED");
-    setLED(true, false, false);  // Red = Error
-  }
-  
-  delay(2000);
-  
-  // Initialize RoboEyes mode (after display is initialized)
-  roboEyes = new RoboEyesMode(ui.getDisplay());
-  Serial.println("\n✓ RoboEyes mode available");
-  Serial.println("  Long press encoder button to enter");
-  
-  // Initialize OTA for wireless updates
-  #if OTA_ENABLED
-  Serial.println("\n========================================");
-  Serial.println("Initializing OTA...");
-  Serial.println("========================================");
-  
-  if (ota.begin(WIFI_SSID, WIFI_PASSWORD, OTA_HOSTNAME, OTA_PORT)) {
-    Serial.println("✓ OTA Enabled");
-    Serial.printf("  Hostname: %s.local\n", OTA_HOSTNAME);
-    Serial.printf("  IP: %s\n", ota.getIPAddress().c_str());
-    Serial.printf("  Port: %d\n", OTA_PORT);
-    Serial.println("\nReady for wireless updates!");
-    Serial.println("Use: pio run -t upload --upload-port " + ota.getIPAddress());
-    
-    // Blink green LED 10 times to indicate successful WiFi connection
-    Serial.println("\nWiFi connected - blinking green LED...");
-    for (int i = 0; i < 10; i++) {
-      setLED(false, true, false);  // Green ON
-      delay(500);
-      setLED(false, false, false); // LED OFF
-      delay(500);
+  Serial.begin(115200);
+  delay(100);
+
+  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
+    Serial.println("Display initialization failed");
+    while (true) {
+      delay(1000);
     }
-  } else {
-    Serial.println("✗ OTA initialization failed");
-    Serial.println("  Continuing with USB-only mode...");
   }
-  #endif
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(16, 24);
+  display.print(F("Tarak's HID"));
+  display.display();
+
+  setupWifi();
+  setupBle();
 }
 
 void loop() {
-  // Handle OTA updates
-  #if OTA_ENABLED
-  ota.handle();
-  #endif
-  
-  static bool lastConnectionState = false;
-  static unsigned long lastStatusCheck = 0;
-  static unsigned long lastBlink = 0;
-  static bool ledState = false;
-  static unsigned long encoderButtonPressTime = 0;
-  static bool encoderButtonPressed = false;
-  
-  unsigned long now = millis();
-  
-  // Check for RoboEyes mode toggle (long press encoder button)
-  bool encoderButton = (digitalRead(ENCODER_BTN_PIN) == LOW);
-  if (encoderButton && !encoderButtonPressed) {
-    encoderButtonPressed = true;
-    encoderButtonPressTime = now;
-  } else if (!encoderButton && encoderButtonPressed) {
-    encoderButtonPressed = false;
-    unsigned long pressDuration = now - encoderButtonPressTime;
-    
-    // Long press to toggle RoboEyes mode
-    if (pressDuration >= LONG_PRESS_THRESHOLD_MS) {
-      if (appState == AppState::ROBOEYES) {
-        // Exit RoboEyes mode
-        appState = AppState::NORMAL;
-        Serial.println("\n✗ Exiting RoboEyes mode");
-        ui.drawHIDStatus(hid.isConnected());
-      } else if (appState == AppState::NORMAL) {
-        // Enter RoboEyes mode
-        appState = AppState::ROBOEYES;
-        Serial.println("\n✓ Entering RoboEyes mode");
-        roboEyes->begin();
-      }
-    }
+  const unsigned long now = millis();
+  if (now - gLastRender >= DISPLAY_REFRESH_MS) {
+    gLastRender = now;
+    renderScreen();
   }
-  
-  // Handle different application states
-  if (appState == AppState::ROBOEYES) {
-    // RoboEyes mode - handle keypad input and update animation
-    roboEyes->update();
-    
-    matrix.update();
-    char key;
-    if (matrix.getKey(key)) {
-      roboEyes->handleKey(key);
-    }
-    
-  } else {
-    // Normal mode - HID functionality
-    
-    // Check HID connection status periodically
-    if (now - lastStatusCheck > STATUS_UPDATE_MS) {
-      bool isConnected = hid.isConnected();
-      
-      // Connection state changed
-      if (isConnected != lastConnectionState) {
-        lastConnectionState = isConnected;
-        
-        if (isConnected) {
-          Serial.println("HID Connected");
-          setLED(false, true, false);  // Green
-          ui.drawHIDStatus(true);
-        } else {
-          Serial.println("HID Disconnected");
-          setLED(true, false, false);  // Red
-          ui.drawHIDStatus(false);
-        }
-      }
-      
-      // Blink blue LED if POST passed but not connected
-      if (results.allPassed() && !isConnected) {
-        if (now - lastBlink > 2000) {
-          ledState = !ledState;
-          setLED(ledState ? false : true, false, ledState ? true : false);
-          lastBlink = now;
-        }
-      }
-      
-      lastStatusCheck = now;
-    }
-    
-    // Monitor keypresses (for testing HID)
-    matrix.update();
-    char key;
-    if (matrix.getKey(key)) {
-      Serial.printf("Key: %c\n", key);
-      
-      // If connected, send test keystroke
-      if (hid.isConnected()) {
-        hid.sendKey(HID_KEY_A + (key - '1'));  // Simple mapping for demo
-        Serial.println("  -> Sent via HID");
-      }
-    }
-  }
-  
+
   delay(10);
 }
